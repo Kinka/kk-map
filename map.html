@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html ng-app>
+<head>
+	<meta http-equiv="Content-Type" content="type=text/html; charset=utf8">
+<style type="text/css">
+html {
+	height: 100%;
+}
+body {
+	padding: 0;
+	margin: 0;
+	width: 100%;
+	height: 100%;
+}
+canvas { width: 100%; height: 99%; }
+#container {width: -webkit-calc(100% - 200px); height: 100%; }
+
+[ng-cloak], ng-cloak {
+	display: none;
+}
+.menu {
+	position: absolute;
+	right: 0;
+	top: 0;
+	width: 200px;
+}
+.menu .option {
+	display: block;
+	padding: 8px;
+}
+
+.datasource select {
+	display: block;
+	margin: 8px;
+	max-width: 180px;
+	width: 180px;
+}
+.datasource option {
+	max-width: 180px;
+	width: 180px;
+}
+
+#loading {
+	display: block;
+	width: 80px;
+	margin: 0 auto;
+}
+#loading.hide {
+	display: none;
+}
+#loading.show {
+	display: block;
+}
+
+#provinceLabel {
+	padding: 8px;
+	font-size: 60px;
+}
+</style>
+</head>
+<body>
+<div class="menu" ng-controller="KKController" ng-cloak>
+	<div class='options'>
+		<span class="option">灯光<input type='checkbox' ng-model="lightSwitch" ng-change="onSwitchLight()"></span>
+		<span class="option">连续播放<input type='checkbox' ng-model="animationSwitch" ng-change="onAnimationSwitch()"></span>
+	</div>
+
+	<div class="datasource">
+		<select ng-model="date" ng-change="dateChange()"
+			ng-options="d for d in dates">
+			<option value=''>请选择一个日期</option>
+		</select>
+		<select ng-model="project" ng-change="projectChange()" 
+			ng-options="p.projectID as p.projectName for p in projects">
+			<option value=''>所有项目</option>
+		</select>
+	</div>
+
+	<img id='loading' src="img/loading.gif" title="loading"/>
+
+	<div id='provinceLabel'></div>
+</div>
+
+<script src="js/three.min.js"></script>
+
+<script src="js/controls/TrackballControls.js"></script>
+
+<script src="map.js"></script>
+<script src="kk.js"></script>
+<script src="js/libs/angular.min.js"></script>
+
+<script>
+var dummyTexture = getDummyTexture();
+
+var chinaGeo = createMap();
+
+var camera = setupCamera();
+
+var light = setupLight();
+
+var renderer = setupRenderer();
+
+var controls = setupControls();
+
+setupInteraction();
+
+function setupMenu() {
+
+	document.appendChild(menu);
+}
+
+var animationCycles = animationCycles || [];
+
+animate();
+
+function animate() {
+	requestAnimationFrame( animate );
+	controls.update();
+
+	render();
+}
+
+function render() {
+	var t = +new Date();
+	var time = t * 0.0025;
+
+	var x = Math.sin(time*0.1) * 150,
+		y = Math.cos(time*0.1) * 150;
+
+	light.position.x = x;
+	light.position.y = y;
+
+	if(animationCycles && animationCycles.length>0) {
+		for(var i=0, len=animationCycles.length; i<len; i++) {
+			var cycle = animationCycles[i];
+			if (!cycle) continue;
+
+			if(!cycle.initialized) {
+				cycle.init(t);
+			} else if (!cycle.finished) {
+				cycle.loop(t);
+			}
+		}
+	}
+
+
+	renderer.clear();
+	renderer.render(scene, camera);
+}
+
+function buildDateList(start, gap) {
+	var date = new Date(start);
+	var list = [];
+	for(var i=0; i<gap; i++) {
+		var m = date.getMonth()+1,
+			d = date.getDate();
+		if (m<10)
+			m = '0' + m;
+		if (d<10)
+			d = '0' + d;
+		list.push(date.getFullYear() + '-' + m + '-' + d);
+		date.setDate(date.getDate() + 1);
+	}
+
+	return list;
+}
+
+function loading(isLoading) {
+	window._loading = window._loading || document.getElementById('loading');
+	if(isLoading)
+		window._loading.className = 'show';
+	else
+		window._loading.className = 'hide';
+}
+
+function mock() {
+	var mockData = {};
+	for(var p in chinaGeo.provinces) {
+		mockData[p] = Math.random();
+	}
+	updateMap(mockData);
+	console.log(mockData);
+}
+
+var mapData = null;
+function showMapOfDate(day) {
+	if (!mapData) return;
+
+	day = day || '2012-11-17';
+
+	var data = {};
+	data.max = -1;
+	data.min = 1e9;
+	for(var p in kk.provincePinyin) {
+		data[p] = (mapData[p] && +mapData[p][day]) || 0;
+
+		data.max = Math.max(data.max, data[p]);
+		data.min = Math.min(data.min, data[p]);
+	}
+
+	// 归一化处理
+	var provPinyin = kk.provincePinyin; // [{'上海':'shanghai'},...]
+	var dataPinyin = {};
+	var denominator = data.max - data.min;
+
+	for(var p in provPinyin) {
+		
+		if(denominator > 0) {
+			var value = (data[p]-data.min)/denominator;
+			dataPinyin[provPinyin[p]] = value;
+		} else {
+			dataPinyin[provPinyin[p]] = 0;
+		}
+	}
+
+	updateMap(dataPinyin);
+}
+
+var isMocking = true;
+function KKController($scope, $http, $timeout) {
+	$scope.projects = [{"projectID":1049,"projectName":"南方基金"},{"projectID":1050,"projectName":"华夏基金"}];
+	$scope.project = '';
+	$scope.dates = buildDateList('2012-11-16', 30);
+
+	$scope.dateIndex = $scope.dates.length-1;
+	$scope.date = $scope.dates[$scope.dateIndex];
+
+	$scope.lightSwitch = false;
+	$scope.animationSwitch = true;
+
+	var timerID = null;
+
+	$scope.dateChange = function() {
+		$scope.dateIndex = $scope.dates.indexOf($scope.date);
+
+		showMapOfDate(this.date);
+	}
+
+	function weird() {
+		$scope.date = $scope.dates[$scope.dateIndex];
+
+		showMapOfDate($scope.date);
+
+		if ($scope.dateIndex==0) {
+			$scope.dateIndex = $scope.dates.length-1;
+		} else {
+			$scope.dateIndex--;
+		}
+
+		timerID = $timeout(weird, 3000).$$timeoutId;
+	}
+
+	$scope.onAnimationSwitch = function() {
+		if (this.animationSwitch) {
+			weird();
+		} else {
+			clearTimeout(timerID);
+			timerID = null;
+		}
+	}
+
+	$scope.init = function() {
+		if (isMocking)
+			projectDataLoaded(mockProjectData);
+		else
+			$http.get('server.php', {'cache': true}).success(projectDataLoaded);		
+	}
+	function projectDataLoaded(data) {
+		$scope.projects = data;
+	}
+	$scope.init();
+
+	$scope.onSwitchLight = function() {
+		if(this.lightSwitch) {
+			scene.add(light);
+		} else {
+			scene.remove(light);
+		}
+	}
+	$scope.onSwitchLight();
+
+	$scope.projectChange = function() {
+		loading(true);
+
+		if (isMocking)
+			provinceDataLoaded(mockProvinceData);
+		else
+			$http.get('server.php?what=info&projectID='+($scope.project||0), {cache: true}).success(provinceDataLoaded);
+	}
+	function provinceDataLoaded(data) {
+		mapData = data;
+
+		showMapOfDate($scope.date);
+
+		loading(false);
+
+		$scope.onAnimationSwitch();
+	}
+	$scope.projectChange();
+}
+</script>
+</body>
+</html>
