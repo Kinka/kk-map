@@ -216,7 +216,7 @@ function showMapOfDate(day) {
 	updateMap(dataPinyin);
 }
 
-var isMocking = true;
+var isMocking = false;
 function KKController($scope, $http, $timeout) {
 	$scope.projects = [{"projectID":1049,"projectName":"南方基金"},{"projectID":1050,"projectName":"华夏基金"}];
 	$scope.project = '';
@@ -228,7 +228,7 @@ function KKController($scope, $http, $timeout) {
 	$scope.lightSwitch = false;
 	$scope.animationSwitch = true;
 
-	var timerID = null;
+	var promise = null;
 
 	$scope.dateChange = function() {
 		$scope.dateIndex = $scope.dates.indexOf($scope.date);
@@ -247,15 +247,14 @@ function KKController($scope, $http, $timeout) {
 			$scope.dateIndex--;
 		}
 
-		timerID = $timeout(weird, 3000).$$timeoutId;
+		promise = $timeout(weird, 3000);
 	}
 
 	$scope.onAnimationSwitch = function() {
+		$timeout.cancel(promise);
+
 		if (this.animationSwitch) {
 			weird();
-		} else {
-			clearTimeout(timerID);
-			timerID = null;
 		}
 	}
 
